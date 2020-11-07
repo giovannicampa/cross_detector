@@ -8,12 +8,13 @@ from skimage.transform import hough_line, hough_line_peaks
 from skimage.morphology import erosion, skeletonize
 from skimage.filters import threshold_mean, median
 from skimage.exposure import equalize_adapthist
-
+from skimage.draw import rectangle_perimeter
 
 from sklearn.cluster import DBSCAN
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
+
 
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
@@ -21,48 +22,82 @@ from matplotlib import cm
 image_original = io.imread("./src/dendrite_crosses.jpg")
 image= rgb2gray(image_original)
 
-image_contrast = equalize_adapthist(image)   # increase contrasts
-image_median_f = median(image_contrast)      # median filter to sharped edges
 
-threshold = threshold_mean(image_median_f)
-image_thresholded = image_median_f > threshold
+# ---------------------------------------------------------------------------------------------------------
+# - Image preprocessing
 
+image_contrast = equalize_adapthist(image)   # increase contrasts (preparation for thresholding)
+image_median_filter = median(image_contrast)      # median filter to sharped edges
+
+# Removing background with thresholding
+threshold = threshold_mean(image_median_filter)
+image_thresholded = image_median_filter > threshold
 image_thresholded = image_thresholded/255.0
 
-# Erode image to remove smaller areas
+# Erode image to remove smaller areas of unnnecessary details
 image_eroded_3 = cv2.erode(src = image_thresholded, kernel = np.ones((2,2), np.uint8), iterations = 15)
 image_dilated = cv2.dilate(image_eroded_3, kernel = np.ones((2,2), np.uint8), iterations = 5)
 
+# Reducing the resulting crosses to lines
 image_skeleton = skeletonize(image_dilated*255.0)
 
 image_skeleton_dilated = cv2.dilate(image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 4)
 
-# image_skeleton_dilated[image_skeleton_dilated > 0.001] = 0
 
-# plt.imshow(image_skeleton_dilated)
-# plt.show()
+# ---------------------------------------------------------------------------------------------------------
+# - Clustering
 
+# Converting the image in a list of features for every pixel as a preparation
+# for the clustering 
 pixel_list = []
 rows, cols = image_skeleton_dilated.shape
 for r in range(rows):
     for c in range(cols):
         pixel_list.append([image_skeleton_dilated[r, c], r, c])
 
+pixel_list = np.array(pixel_list)
 
-# Clustering the different crosses
+# Clustering to separate the different crosses
 dbscan = DBSCAN(eps=1, min_samples=5).fit(pixel_list)
 labels = dbscan.labels_.reshape(image_skeleton_dilated.shape)
 
+# Iterating over labels = over separate crosses
 for label in np.unique(labels):
 
     nr_elements = sum(sum(labels == label))
-    # If cluster too small, skip it
+
+    # Skipping too small and too large clusters
     if nr_elements < 200 or nr_elements > 5000:
         print("Skipped cluster with {}".format(nr_elements))
         continue
+
+    # New image to show the current cluster
     current_cluster = np.zeros(image_skeleton_dilated.shape)
     current_cluster[labels == label] = 255
 
+
+    # Removing the edges of the cross to get a clearer shape
+    idx_cluster = (labels.ravel() == label).tolist()
+
+    top = max(pixel_list[idx_cluster,1])
+    bottom = min(pixel_list[idx_cluster,1])
+    right = max(pixel_list[idx_cluster,2])
+    left = min(pixel_list[idx_cluster,2])
+
+    height = top - bottom
+    width = right - left
+
+    centre = np.array([left + width /2, bottom + height/2])
+
+    for r in range(rows):
+        for c in range(cols):
+            if r > centre[0] + height *0.3 or r < centre[0] - height *0.3 or c > centre[1] + width *0.3 or c < centre[1] - width *0.3:
+                current_cluster[r,c] = 0
+                
+    rr, cc = rectangle_perimeter(centre, centre + np.array(width/2, height/2))
+    current_cluster[rr.reshape(rows, cols), cc.reshape(rows, cols)] = 1
+
+    # Applying the hough transform to find the edges
     origin = np.array((0, image_skeleton_dilated.shape[1]))
     tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
     h, theta, d = hough_line(current_cluster, theta=tested_angles)
@@ -73,9 +108,13 @@ for label in np.unique(labels):
 
     plt.imshow(current_cluster)
 
-    plt.title("Nr elements: {}".format(nr_elements))
+    plt.title(f"Nr elements: {nr_elements}, centre at: {centre[0]}, {centre[1]}, width: {width}, height: {height}")
     plt.show()
 
+
+
+# # ---------------------------------------------------------------------------------------------------------
+# # - Plots
 
 
 # fig, ax = plt.subplots(1,3)
@@ -90,18 +129,13 @@ for label in np.unique(labels):
 # ax[1].set_title("Thresholded")
 
 # plt.show()
-# ---------------------------------------------------------------------------------------------------------
-# - Preprocessing
-
-
 
 
 
 # tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
 # h, theta, d = hough_line(image_dilated, theta=tested_angles)
 
-# # ---------------------------------------------------------------------------------------------------------
-# # - Plots
+
 # fig, axes = plt.subplots(1, 4, figsize=(15, 6))
 # ax = axes.ravel()
 
