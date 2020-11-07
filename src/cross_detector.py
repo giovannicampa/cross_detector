@@ -62,12 +62,20 @@ dbscan = DBSCAN(eps=1, min_samples=5).fit(pixel_list)
 labels = dbscan.labels_.reshape(image_skeleton_dilated.shape)
 
 # Iterating over labels = over separate crosses
+
+top = {"row":0, "col":0}
+bottom = top.copy()
+left = top.copy()
+right = top.copy()
+centre = top.copy()
+centre_cross = top.copy()
+
 for label in np.unique(labels):
 
     nr_elements = sum(sum(labels == label))
 
     # Skipping too small and too large clusters
-    if nr_elements < 200 or nr_elements > 5000:
+    if nr_elements < 200 or nr_elements > 3500:
         print("Skipped cluster with {}".format(nr_elements))
         continue
 
@@ -76,39 +84,75 @@ for label in np.unique(labels):
     current_cluster[labels == label] = 255
 
 
-    # Removing the edges of the cross to get a clearer shape
     idx_cluster = (labels.ravel() == label).tolist()
+    pixel_cluster = pixel_list[idx_cluster,:]
 
-    top = max(pixel_list[idx_cluster,1])
-    bottom = min(pixel_list[idx_cluster,1])
-    right = max(pixel_list[idx_cluster,2])
-    left = min(pixel_list[idx_cluster,2])
+    top_id = np.argmax(pixel_cluster[:,1])
+    top["row"] = pixel_cluster[top_id, 1]
+    top["col"] = pixel_cluster[top_id, 2]
 
-    height = top - bottom
-    width = right - left
+    bottom_id = np.argmin(pixel_cluster[:,1])
+    bottom["row"] = pixel_cluster[bottom_id, 1]
+    bottom["col"] = pixel_cluster[bottom_id, 2]
 
-    centre = np.array([left + width /2, bottom + height/2])
+    right_id = np.argmax(pixel_cluster[:,2])
+    right["row"] = pixel_cluster[right_id, 1]
+    right["col"] = pixel_cluster[right_id, 2]
 
+    left_id = np.argmin(pixel_cluster[:,2])
+    left["row"] = pixel_cluster[left_id, 1]
+    left["col"] = pixel_cluster[left_id, 2]
+
+
+    height = top["row"] - bottom["row"]
+    width = right["col"] - left["col"]
+
+    # centre = np.array([left["x"] + width /2, bottom["row"] + height/2])
+    centre["col"] = left["col"] + width /2
+    centre["row"] = bottom["row"] + height/2
+
+    # Drawing a rectangle around the centre we want to keep
+    centre_cross["row"] = (left["row"] + right["row"])/2
+    centre_cross["col"] = (top["col"] + bottom["col"])/2
+
+    height_cross = min(top["row"] - centre_cross["row"], centre_cross["row"] - bottom["row"])
+    width_cross = min(right["col"] - centre_cross["col"], centre_cross["col"] - left["col"])
+
+    limit_row_top = centre_cross["row"] + height_cross*0.7
+    limit_row_bottom = centre_cross["row"] - height_cross*0.7
+    limit_col_left = centre_cross["col"] - width_cross*0.7
+    limit_col_right = centre_cross["col"] + width_cross*0.7
+
+
+    # Removing the edges of the cross to get a clearer shape
     for r in range(rows):
         for c in range(cols):
-            if r > centre[0] + height *0.3 or r < centre[0] - height *0.3 or c > centre[1] + width *0.3 or c < centre[1] - width *0.3:
+            if r > limit_row_top or r < limit_row_bottom or c > limit_col_right or c < limit_col_left:
                 current_cluster[r,c] = 0
                 
-    rr, cc = rectangle_perimeter(centre, centre + np.array(width/2, height/2))
-    current_cluster[rr.reshape(rows, cols), cc.reshape(rows, cols)] = 1
 
-    # Applying the hough transform to find the edges
-    origin = np.array((0, image_skeleton_dilated.shape[1]))
-    tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
-    h, theta, d = hough_line(current_cluster, theta=tested_angles)
+    # # Applying the hough transform to find the edges
+    # origin = np.array((0, image_skeleton_dilated.shape[1]))
+    # tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
+    # h, theta, d = hough_line(current_cluster, theta=tested_angles)
 
-    for _, angle, dist in zip(*hough_line_peaks(h, theta, d)):
-        y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
-        plt.plot(origin, (y0, y1), '-r')
+    # for _, angle, dist in zip(*hough_line_peaks(h, theta, d)):
+    #     y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
+    #     plt.plot(origin, (y0, y1), '-r')
 
-    plt.imshow(current_cluster)
 
-    plt.title(f"Nr elements: {nr_elements}, centre at: {centre[0]}, {centre[1]}, width: {width}, height: {height}")
+
+    # Drawing a rectangle around the found blob
+    rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
+    current_cluster[rr_outer, cc_outer] = 255
+
+
+    rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*0.7, centre_cross["col"] + width_cross*0.7), (centre_cross["row"] - height_cross*0.7, centre_cross["col"] - width_cross*0.7), shape = current_cluster.shape)
+    current_cluster[rr_inner, cc_inner] = 255
+
+    plt.imshow(current_cluster, cmap=cm.gray)
+
+    plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
     plt.show()
 
 
