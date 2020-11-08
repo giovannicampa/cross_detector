@@ -1,3 +1,5 @@
+from concurrent.futures import ProcessPoolExecutor
+import time
 import numpy as np
 
 import cv2
@@ -11,6 +13,7 @@ from skimage.exposure import equalize_adapthist
 from skimage.draw import rectangle_perimeter
 
 from sklearn.cluster import DBSCAN
+from sklearn.decomposition import PCA
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -35,13 +38,14 @@ image_thresholded = image_median_filter > threshold
 image_thresholded = image_thresholded/255.0
 
 # Erode image to remove smaller areas of unnnecessary details
-image_eroded_3 = cv2.erode(src = image_thresholded, kernel = np.ones((2,2), np.uint8), iterations = 15)
-image_dilated = cv2.dilate(image_eroded_3, kernel = np.ones((2,2), np.uint8), iterations = 5)
+image_eroded = cv2.erode(src = image_thresholded, kernel = np.ones((2,2), np.uint8), iterations = 15)
+image_dilated = cv2.dilate(src = image_eroded, kernel = np.ones((2,2), np.uint8), iterations = 2)
+image_dilated = image_eroded
 
 # Reducing the resulting crosses to lines
 image_skeleton = skeletonize(image_dilated*255.0)
 
-image_skeleton_dilated = cv2.dilate(image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 4)
+image_skeleton_dilated = cv2.dilate(image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 2)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -70,23 +74,27 @@ right = top.copy()
 centre = top.copy()
 centre_cross = top.copy()
 
-for label in np.unique(labels):
+
+
+def process_cluster(label):
 
     nr_elements = sum(sum(labels == label))
 
     # Skipping too small and too large clusters
     if nr_elements < 200 or nr_elements > 3500:
-        print("Skipped cluster with {}".format(nr_elements))
-        continue
+        # print("Skipped cluster with {}".format(nr_elements))
+        return
 
     # New image to show the current cluster
     current_cluster = np.zeros(image_skeleton_dilated.shape)
     current_cluster[labels == label] = 255
 
-
+    # Filtering out the pixels of the current cluster
     idx_cluster = (labels.ravel() == label).tolist()
     pixel_cluster = pixel_list[idx_cluster,:]
 
+
+    # Finding the coordinates of the cross limits
     top_id = np.argmax(pixel_cluster[:,1])
     top["row"] = pixel_cluster[top_id, 1]
     top["col"] = pixel_cluster[top_id, 2]
@@ -104,10 +112,11 @@ for label in np.unique(labels):
     left["col"] = pixel_cluster[left_id, 2]
 
 
+    # Size of the skeletized cluster
     height = top["row"] - bottom["row"]
     width = right["col"] - left["col"]
 
-    # centre = np.array([left["x"] + width /2, bottom["row"] + height/2])
+    # Centre of the skeletized cluster
     centre["col"] = left["col"] + width /2
     centre["row"] = bottom["row"] + height/2
 
@@ -131,48 +140,86 @@ for label in np.unique(labels):
                 current_cluster[r,c] = 0
                 
 
+    current_cluster = cv2.erode(current_cluster/255.0, kernel = (2,2), iterations=3)*255.0
+
     # # Applying the hough transform to find the edges
     # origin = np.array((0, image_skeleton_dilated.shape[1]))
     # tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
     # h, theta, d = hough_line(current_cluster, theta=tested_angles)
 
-    # for _, angle, dist in zip(*hough_line_peaks(h, theta, d)):
+    # for _, angle, dist in zip(*hough_line_peaks(h, theta, d, num_peaks=2)):
     #     y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
     #     plt.plot(origin, (y0, y1), '-r')
 
+    # Finding the crosses with PCA
+    # pixel_list_current_cluster = []
+    # for r in range(rows):
+    #     for c in range(cols):
+    #         if current_cluster[r,c] != 0:
+    #             pixel_list_current_cluster.append([r, c])
+
+    # pixel_list_current_cluster = np.array(pixel_list_current_cluster)
+
+    # pca = PCA(n_components=2)
+    # pca.fit(pixel_list_current_cluster)
+
+    # m_1, m_2 = pca.components_[0]
+
+    # dx_1 = np.cos(np.arctan(m_1))
+    # dy_1 = np.sin(np.arctan(m_1))
+
+    # dx_2 = np.cos(np.arctan(m_2))
+    # dy_2 = np.sin(np.arctan(m_2))
 
 
     # Drawing a rectangle around the found blob
     rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
-    current_cluster[rr_outer, cc_outer] = 255
-
+    # current_cluster[rr_outer, cc_outer] = 255
+    image_thresholded[rr_outer, cc_outer] = 255
 
     rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*0.7, centre_cross["col"] + width_cross*0.7), (centre_cross["row"] - height_cross*0.7, centre_cross["col"] - width_cross*0.7), shape = current_cluster.shape)
-    current_cluster[rr_inner, cc_inner] = 255
+    # current_cluster[rr_inner, cc_inner] = 255
+    image_thresholded[rr_inner, cc_inner] = 255
 
-    plt.imshow(current_cluster, cmap=cm.gray)
+    # plt.imshow(image, cmap=cm.gray)
 
-    plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
-    plt.show()
+    # plt.imshow(current_cluster, cmap=cm.gray)
+    # plt.imshow(image_thresholded, cmap=cm.gray)
+    # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_1*10, centre["row"] + dy_1*10, width = 0.5)
+    # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_2*10, centre["row"] + dy_2*10, width = 0.5)
+
+    # plt.scatter(centre_cross["col"], centre_cross["row"])
+
+    # plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
+    # plt.show()
+    return centre_cross["col"], centre_cross["row"]
 
 
+
+# Parallelize cross finding operation over different cluster
+centres = []
+with ProcessPoolExecutor() as executor:     
+    results = executor.map(process_cluster, np.unique(labels))
+
+# Store results
+for cross_centre in results:
+    if cross_centre != None:
+        centres.append(cross_centre)
+
+# for label in cross_cluster_labels:
+#     cross_centre = process_cluster(label)
+#     if cross_centre != None:
+#         centres.append(cross_centre)
+
+
+
+centres = np.array(centres)
+plt.scatter(centres[:,0], centres[:,1], color = "r")
+plt.imshow(image_thresholded, cmap = cm.gray)
+plt.show()
 
 # # ---------------------------------------------------------------------------------------------------------
 # # - Plots
-
-
-# fig, ax = plt.subplots(1,3)
-
-# ax[0].imshow(image, cmap=cm.gray)
-# ax[1].imshow(image_skeleton_dilated, cmap=cm.gray)
-
-# ax[0].axis("off")
-# ax[1].axis("off")
-
-# ax[0].set_title("Median filter")
-# ax[1].set_title("Thresholded")
-
-# plt.show()
 
 
 
@@ -182,16 +229,6 @@ for label in np.unique(labels):
 
 # fig, axes = plt.subplots(1, 4, figsize=(15, 6))
 # ax = axes.ravel()
-
-# # Original image
-# ax[0].imshow(image_original, cmap=cm.gray)
-# ax[0].set_title('Input image')
-# ax[0].set_axis_off()
-
-# # Processed image
-# ax[1].imshow(image_skeleton, cmap=cm.gray)
-# ax[1].set_title('Processed image')
-# ax[1].set_axis_off()
 
 # # Hough transform
 # ax[2].imshow(np.log(1 + h), extent=[np.rad2deg(theta[-1]), np.rad2deg(theta[0]), d[-1], d[0]], cmap=cm.gray, aspect=1/1.5)
