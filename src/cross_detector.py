@@ -23,7 +23,8 @@ from matplotlib import cm
 # - Reading image
 
 image_original = io.imread("./src/dendrite_crosses.jpg")
-image= rgb2gray(image_original)
+image_cropped = image_original[20:-20, 20:-20]
+image= rgb2gray(image_cropped)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -38,15 +39,23 @@ image_thresholded = image_median_filter > threshold
 image_thresholded = image_thresholded/255.0
 
 # Erode image to remove smaller areas of unnnecessary details
-image_eroded = cv2.erode(src = image_thresholded, kernel = np.ones((2,2), np.uint8), iterations = 15)
-image_dilated = cv2.dilate(src = image_eroded, kernel = np.ones((2,2), np.uint8), iterations = 2)
-image_dilated = image_eroded
+
+opening = cv2.morphologyEx(image_thresholded, cv2.MORPH_OPEN, kernel = np.ones((6,6)), iterations=1)
+closing = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel = np.ones((6,6)), iterations=1)
+
+erode = cv2.erode(src = closing, kernel = np.ones((2,2), np.uint8), iterations = 15)
 
 # Reducing the resulting crosses to lines
-image_skeleton = skeletonize(image_dilated*255.0)
+image_skeleton = skeletonize(erode*255.0)
+image_skeleton_dilated = cv2.dilate(src = image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 2)
 
-image_skeleton_dilated = cv2.dilate(image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 2)
+fig, ax = plt.subplots(1,3)
 
+ax[0].imshow(image_thresholded, cmap = "gray")
+ax[1].imshow(opening, cmap = "gray")
+ax[2].imshow(closing, cmap = "gray")
+
+plt.show()
 
 # ---------------------------------------------------------------------------------------------------------
 # - Clustering
@@ -61,11 +70,10 @@ for r in range(rows):
 
 pixel_list = np.array(pixel_list)
 
-# Clustering to separate the different crosses
+# Clustering to separate the crosses and analyse them separately
 dbscan = DBSCAN(eps=1, min_samples=5).fit(pixel_list)
 labels = dbscan.labels_.reshape(image_skeleton_dilated.shape)
 
-# Iterating over labels = over separate crosses
 
 top = {"row":0, "col":0}
 bottom = top.copy()
@@ -127,10 +135,10 @@ def process_cluster(label):
     height_cross = min(top["row"] - centre_cross["row"], centre_cross["row"] - bottom["row"])
     width_cross = min(right["col"] - centre_cross["col"], centre_cross["col"] - left["col"])
 
-    limit_row_top = centre_cross["row"] + height_cross*0.7
-    limit_row_bottom = centre_cross["row"] - height_cross*0.7
-    limit_col_left = centre_cross["col"] - width_cross*0.7
-    limit_col_right = centre_cross["col"] + width_cross*0.7
+    limit_row_top = centre_cross["row"] + height_cross*0.8
+    limit_row_bottom = centre_cross["row"] - height_cross*0.8
+    limit_col_left = centre_cross["col"] - width_cross*0.8
+    limit_col_right = centre_cross["col"] + width_cross*0.8
 
 
     # Removing the edges of the cross to get a clearer shape
@@ -140,7 +148,7 @@ def process_cluster(label):
                 current_cluster[r,c] = 0
                 
 
-    current_cluster = cv2.erode(current_cluster/255.0, kernel = (2,2), iterations=3)*255.0
+    current_cluster = cv2.erode(current_cluster/255.0, kernel = (2,2), iterations=3, anchor)*255.0
 
     # # Applying the hough transform to find the edges
     # origin = np.array((0, image_skeleton_dilated.shape[1]))
@@ -175,11 +183,11 @@ def process_cluster(label):
     # Drawing a rectangle around the found blob
     rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
     # current_cluster[rr_outer, cc_outer] = 255
-    image_thresholded[rr_outer, cc_outer] = 255
+    erode[rr_outer, cc_outer] = 255
 
     rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*0.7, centre_cross["col"] + width_cross*0.7), (centre_cross["row"] - height_cross*0.7, centre_cross["col"] - width_cross*0.7), shape = current_cluster.shape)
     # current_cluster[rr_inner, cc_inner] = 255
-    image_thresholded[rr_inner, cc_inner] = 255
+    erode[rr_inner, cc_inner] = 255
 
     # plt.imshow(image, cmap=cm.gray)
 
@@ -215,7 +223,7 @@ for cross_centre in results:
 
 centres = np.array(centres)
 plt.scatter(centres[:,0], centres[:,1], color = "r")
-plt.imshow(image_thresholded, cmap = cm.gray)
+plt.imshow(erode, cmap = cm.gray)
 plt.show()
 
 # # ---------------------------------------------------------------------------------------------------------
