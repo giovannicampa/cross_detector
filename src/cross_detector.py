@@ -18,6 +18,11 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
+from scipy.ndimage.measurements import center_of_mass
+
+check_pixel_shift = True
+check_preprocessing = True
+check_single_cross = False
 
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
@@ -26,6 +31,7 @@ image_original = io.imread("./src/dendrite_crosses.jpg")
 image_cropped = image_original[20:-20, 20:-20]
 image= rgb2gray(image_cropped)
 
+image[800:-1, 860:-1] = 0
 
 # ---------------------------------------------------------------------------------------------------------
 # - Image preprocessing
@@ -39,23 +45,49 @@ image_thresholded = image_median_filter > threshold
 image_thresholded = image_thresholded/255.0
 
 # Erode image to remove smaller areas of unnnecessary details
-
 opening = cv2.morphologyEx(image_thresholded, cv2.MORPH_OPEN, kernel = np.ones((6,6)), iterations=1)
 closing = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel = np.ones((6,6)), iterations=1)
-
 erode = cv2.erode(src = closing, kernel = np.ones((2,2), np.uint8), iterations = 15)
 
 # Reducing the resulting crosses to lines
 image_skeleton = skeletonize(erode*255.0)
 image_skeleton_dilated = cv2.dilate(src = image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 2)
 
-fig, ax = plt.subplots(1,3)
+# Correcting the shift due to the preprocessing
+shift_rows = 10
+shift_cols = 10
+image_skeleton_dilated = image_skeleton_dilated[shift_rows:,shift_cols:]
+image_skeleton_dilated = np.append(image_skeleton_dilated, np.zeros([image_skeleton_dilated.shape[0],shift_cols]), axis = 1)
+image_skeleton_dilated = np.append(image_skeleton_dilated, np.zeros([shift_rows,image_skeleton_dilated.shape[1]]), axis = 0)
 
-ax[0].imshow(image_thresholded, cmap = "gray")
-ax[1].imshow(opening, cmap = "gray")
-ax[2].imshow(closing, cmap = "gray")
+
+# ------------------------------------------------------------------------------------------------
+# - Check plots
+if check_preprocessing:
+    fig, ax = plt.subplots(3,2)
+
+    fig.suptitle('Preprocessing')
+    ax[0,0].imshow(image_thresholded, cmap = "gray")
+    ax[0,1].imshow(opening, cmap = "gray")
+    ax[1,0].imshow(closing, cmap = "gray")
+    ax[1,1].imshow(erode, cmap = "gray")
+    ax[2,0].imshow(image_skeleton, cmap = "gray")
+    ax[2,1].imshow(image_skeleton_dilated, cmap = "gray")
+
+    titles = ["image_thresholded","opening","closing","erode", "skeleton", "skeleton dilated"]
+
+    for i, a in enumerate(ax.ravel()):
+        a.set_title(titles[i])
+        a.set_axis_off()
+
+if check_pixel_shift:
+    f = plt.figure()
+    plt.imshow(image)
+    f2 = plt.figure()
+    plt.imshow(image_skeleton_dilated)
 
 plt.show()
+
 
 # ---------------------------------------------------------------------------------------------------------
 # - Clustering
@@ -128,7 +160,7 @@ def process_cluster(label):
     centre["col"] = left["col"] + width /2
     centre["row"] = bottom["row"] + height/2
 
-    # Drawing a rectangle around the centre we want to keep
+    # Drawing a rectangle around the centre we want to keep (abs coordinates)
     centre_cross["row"] = (left["row"] + right["row"])/2
     centre_cross["col"] = (top["col"] + bottom["col"])/2
 
@@ -148,7 +180,9 @@ def process_cluster(label):
                 current_cluster[r,c] = 0
                 
 
-    current_cluster = cv2.erode(current_cluster/255.0, kernel = (2,2), iterations=3, anchor)*255.0
+    # Centre of the blob as centre of mass
+    centre_mass_row, centre_mass_col = center_of_mass(current_cluster)
+
 
     # # Applying the hough transform to find the edges
     # origin = np.array((0, image_skeleton_dilated.shape[1]))
@@ -182,17 +216,24 @@ def process_cluster(label):
 
     # Drawing a rectangle around the found blob
     rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
-    # current_cluster[rr_outer, cc_outer] = 255
-    erode[rr_outer, cc_outer] = 255
+    current_cluster[rr_outer, cc_outer] = 255
 
     rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*0.7, centre_cross["col"] + width_cross*0.7), (centre_cross["row"] - height_cross*0.7, centre_cross["col"] - width_cross*0.7), shape = current_cluster.shape)
-    # current_cluster[rr_inner, cc_inner] = 255
-    erode[rr_inner, cc_inner] = 255
+    current_cluster[rr_inner, cc_inner] = 255
 
-    # plt.imshow(image, cmap=cm.gray)
+    if check_single_cross:
+        fig, ax = plt.subplots(1,2)
+        ax[0].imshow(current_cluster, cmap="gray")
+        ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
+        ax[0].scatter(centre_mass_col, centre_mass_row, color = 'tab:blue', label = "Centre of mass")
 
-    # plt.imshow(current_cluster, cmap=cm.gray)
-    # plt.imshow(image_thresholded, cmap=cm.gray)
+        crop = image_cropped[int(bottom["row"]): int(top["row"]), int(left["col"]): int(right["col"])]
+        ax[1].imshow(image_cropped, cmap = "gray")
+        ax[1].scatter(centre["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
+        ax[1].scatter(centre_mass_col, centre_mass_row, color = 'tab:blue', label = "Centre of mass")
+
+        plt.legend()
+        plt.show()
     # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_1*10, centre["row"] + dy_1*10, width = 0.5)
     # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_2*10, centre["row"] + dy_2*10, width = 0.5)
 
@@ -200,65 +241,36 @@ def process_cluster(label):
 
     # plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
     # plt.show()
-    return centre_cross["col"], centre_cross["row"]
+    return [centre_cross["col"], centre_cross["row"]], [centre_mass_col, centre_mass_row]
 
 
 
 # Parallelize cross finding operation over different cluster
-centres = []
+centres_custom = []
+centres_mass = []
 with ProcessPoolExecutor() as executor:     
     results = executor.map(process_cluster, np.unique(labels))
 
 # Store results
-for cross_centre in results:
-    if cross_centre != None:
-        centres.append(cross_centre)
+for centres in results:
+    if centres != None:
+        cross_centre_custom, cross_centre_mass = centres
+        centres_custom.append(cross_centre_custom)
+        centres_mass.append(cross_centre_mass)
 
-# for label in cross_cluster_labels:
-#     cross_centre = process_cluster(label)
-#     if cross_centre != None:
-#         centres.append(cross_centre)
+# for label in np.unique(labels):
+#     cross_centre_custom, cross_centre_mass = process_cluster(label)
+#     if cross_centre_custom != None:
+#         centres_custom.append(cross_centre_custom)
+#         centres_mass.append(cross_centre_mass)
 
 
 
-centres = np.array(centres)
-plt.scatter(centres[:,0], centres[:,1], color = "r")
-plt.imshow(erode, cmap = cm.gray)
+centres_custom = np.array(centres_custom)
+centres_mass = np.array(centres_mass)
+plt.scatter(centres_custom[:,0], centres_custom[:,1], color = 'tab:orange', label ="Centre custom")
+plt.scatter(centres_mass[:,0], centres_mass[:,1], color = 'tab:blue', label = "Centre of mass")
+plt.imshow(image_cropped, cmap = "gray")
+plt.legend()
 plt.show()
 
-# # ---------------------------------------------------------------------------------------------------------
-# # - Plots
-
-
-
-# tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
-# h, theta, d = hough_line(image_dilated, theta=tested_angles)
-
-
-# fig, axes = plt.subplots(1, 4, figsize=(15, 6))
-# ax = axes.ravel()
-
-# # Hough transform
-# ax[2].imshow(np.log(1 + h), extent=[np.rad2deg(theta[-1]), np.rad2deg(theta[0]), d[-1], d[0]], cmap=cm.gray, aspect=1/1.5)
-# ax[2].set_title('Hough transform')
-# ax[2].set_xlabel('Angles (degrees)')
-# ax[2].set_ylabel('Distance (pixels)')
-# ax[2].axis('image')
-
-
-# # Identified lines
-# ax[3].imshow(image, cmap=cm.gray)
-# origin = np.array((0, image.shape[1]))
-
-# for _, angle, dist in zip(*hough_line_peaks(h, theta, d)):
-#     y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
-#     ax[3].plot(origin, (y0, y1), '-r')
-
-
-# ax[3].set_xlim(origin)
-# ax[3].set_ylim((image.shape[0], 0))
-# ax[3].set_axis_off()
-# ax[3].set_title('Detected lines')
-
-# plt.tight_layout()
-# plt.show()
