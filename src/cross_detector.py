@@ -20,9 +20,9 @@ from matplotlib import cm
 
 from scipy.ndimage.measurements import center_of_mass
 
-check_pixel_shift = True
+check_pixel_shift = False
 check_preprocessing = True
-check_single_cross = False
+check_single_cross = True
 
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
@@ -45,7 +45,8 @@ image_thresholded = image_median_filter > threshold
 image_thresholded = image_thresholded/255.0
 
 # Erode image to remove smaller areas of unnnecessary details
-opening = cv2.morphologyEx(image_thresholded, cv2.MORPH_OPEN, kernel = np.ones((6,6)), iterations=1)
+erode = cv2.erode(src = image_thresholded, kernel = np.ones((2,2), np.uint8), iterations = 1)
+opening = cv2.morphologyEx(erode, cv2.MORPH_OPEN, kernel = np.ones((6,6)), iterations=3)
 closing = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel = np.ones((6,6)), iterations=1)
 erode = cv2.erode(src = closing, kernel = np.ones((2,2), np.uint8), iterations = 15)
 
@@ -82,11 +83,11 @@ if check_preprocessing:
 
 if check_pixel_shift:
     f = plt.figure()
-    plt.imshow(image)
+    plt.imshow(image, cmap = "gray")
     f2 = plt.figure()
-    plt.imshow(image_skeleton_dilated)
+    plt.imshow(image_skeleton_dilated, cmap = "gray")
 
-plt.show()
+# plt.show()
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -185,9 +186,9 @@ def process_cluster(label):
 
 
     # # Applying the hough transform to find the edges
-    # origin = np.array((0, image_skeleton_dilated.shape[1]))
-    # tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
-    # h, theta, d = hough_line(current_cluster, theta=tested_angles)
+    origin = np.array((0, image_skeleton_dilated.shape[1]))
+    tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
+    h, theta, d = hough_line(current_cluster, theta=tested_angles)
 
     # for _, angle, dist in zip(*hough_line_peaks(h, theta, d, num_peaks=2)):
     #     y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
@@ -232,6 +233,10 @@ def process_cluster(label):
         ax[1].scatter(centre["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
         ax[1].scatter(centre_mass_col, centre_mass_row, color = 'tab:blue', label = "Centre of mass")
 
+        for _, angle, dist in zip(*hough_line_peaks(h, theta, d, num_peaks=2)):
+            y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
+            plt.plot(origin, (y0, y1), '-r')
+
         plt.legend()
         plt.show()
     # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_1*10, centre["row"] + dy_1*10, width = 0.5)
@@ -248,26 +253,32 @@ def process_cluster(label):
 # Parallelize cross finding operation over different cluster
 centres_custom = []
 centres_mass = []
-with ProcessPoolExecutor() as executor:     
-    results = executor.map(process_cluster, np.unique(labels))
 
-# Store results
-for centres in results:
-    if centres != None:
-        cross_centre_custom, cross_centre_mass = centres
-        centres_custom.append(cross_centre_custom)
-        centres_mass.append(cross_centre_mass)
+if check_single_cross == False:
+    with ProcessPoolExecutor() as executor:     
+        results = executor.map(process_cluster, np.unique(labels))
 
-# for label in np.unique(labels):
-#     cross_centre_custom, cross_centre_mass = process_cluster(label)
-#     if cross_centre_custom != None:
-#         centres_custom.append(cross_centre_custom)
-#         centres_mass.append(cross_centre_mass)
+    # Store results
+    for centres in results:
+        if centres != None:
+            cross_centre_custom, cross_centre_mass = centres
+            centres_custom.append(cross_centre_custom)
+            centres_mass.append(cross_centre_mass)
+
+else:
+
+    for label in np.unique(labels):
+        results = process_cluster(label)
+        if results != None:
+            cross_centre_custom, cross_centre_mass = results
+            centres_custom.append(cross_centre_custom)
+            centres_mass.append(cross_centre_mass)
 
 
 
 centres_custom = np.array(centres_custom)
 centres_mass = np.array(centres_mass)
+fig = plt.figure()
 plt.scatter(centres_custom[:,0], centres_custom[:,1], color = 'tab:orange', label ="Centre custom")
 plt.scatter(centres_mass[:,0], centres_mass[:,1], color = 'tab:blue', label = "Centre of mass")
 plt.imshow(image_cropped, cmap = "gray")
