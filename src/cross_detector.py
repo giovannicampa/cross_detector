@@ -13,7 +13,7 @@ from skimage.exposure import equalize_adapthist
 from skimage.draw import rectangle_perimeter
 
 from sklearn.cluster import DBSCAN
-from sklearn.decomposition import PCA
+from sklearn.linear_model import RANSACRegressor
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -21,28 +21,27 @@ from matplotlib import cm
 from scipy.ndimage.measurements import center_of_mass
 
 check_pixel_shift = False
-check_preprocessing = True
-check_single_cross = True
+check_preprocessing = False
+check_single_cross = False
 
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
 
 image_original = io.imread("./src/dendrite_crosses.jpg")
-image_cropped = image_original[20:-20, 20:-20]
-image= rgb2gray(image_cropped)
-
-image[800:-1, 860:-1] = 0
+image_cropped = image_original[20:-20, 20:-20]              # Cropping the border
+image= rgb2gray(image_cropped)                              # Converting to gray
+image[800:-1, 860:-1] = 0                                   # Removing the measure reference at the bottom right
 
 # ---------------------------------------------------------------------------------------------------------
 # - Image preprocessing
 
-image_contrast = equalize_adapthist(image)   # increase contrasts (preparation for thresholding)
-image_median_filter = median(image_contrast)      # median filter to sharped edges
+image_contrast = equalize_adapthist(image)                  # increase contrasts (preparation for thresholding)
+image_median_filter = median(image_contrast)                # median filter to sharped edges
 
 # Removing background with thresholding
-threshold = threshold_mean(image_median_filter)
-image_thresholded = image_median_filter > threshold
-image_thresholded = image_thresholded/255.0
+threshold = threshold_mean(image_median_filter)             # thresholding
+image_thresholded = image_median_filter > threshold         # removing the background
+image_thresholded = image_thresholded/255.0                 # adjusting range for cv2
 
 # Erode image to remove smaller areas of unnnecessary details
 erode = cv2.erode(src = image_thresholded, kernel = np.ones((2,2), np.uint8), iterations = 1)
@@ -54,7 +53,7 @@ erode = cv2.erode(src = closing, kernel = np.ones((2,2), np.uint8), iterations =
 image_skeleton = skeletonize(erode*255.0)
 image_skeleton_dilated = cv2.dilate(src = image_skeleton/255.0, kernel = np.ones((2,2), np.uint8), iterations = 2)
 
-# Correcting the shift due to the preprocessing
+# Correcting the shift that occurs due to the preprocessing
 shift_rows = 10
 shift_cols = 10
 image_skeleton_dilated = image_skeleton_dilated[shift_rows:,shift_cols:]
@@ -63,10 +62,10 @@ image_skeleton_dilated = np.append(image_skeleton_dilated, np.zeros([shift_rows,
 
 
 # ------------------------------------------------------------------------------------------------
-# - Check plots
+# - Plots to check the preprocessing results
 if check_preprocessing:
-    fig, ax = plt.subplots(3,2)
 
+    fig, ax = plt.subplots(3,2)
     fig.suptitle('Preprocessing')
     ax[0,0].imshow(image_thresholded, cmap = "gray")
     ax[0,1].imshow(opening, cmap = "gray")
@@ -82,16 +81,15 @@ if check_preprocessing:
         a.set_axis_off()
 
 if check_pixel_shift:
+
     f = plt.figure()
     plt.imshow(image, cmap = "gray")
     f2 = plt.figure()
     plt.imshow(image_skeleton_dilated, cmap = "gray")
 
-# plt.show()
-
 
 # ---------------------------------------------------------------------------------------------------------
-# - Clustering
+# - Clustering the cross blobs to analyse them separately
 
 # Converting the image in a list of features for every pixel as a preparation
 # for the clustering 
@@ -103,11 +101,12 @@ for r in range(rows):
 
 pixel_list = np.array(pixel_list)
 
-# Clustering to separate the crosses and analyse them separately
-dbscan = DBSCAN(eps=1, min_samples=5).fit(pixel_list)
+# Clustering to separate the crosses
+dbscan = DBSCAN(eps=1, min_samples=5, n_jobs = -1).fit(pixel_list)
 labels = dbscan.labels_.reshape(image_skeleton_dilated.shape)
 
 
+# References of the cross in the image
 top = {"row":0, "col":0}
 bottom = top.copy()
 left = top.copy()
@@ -118,13 +117,29 @@ centre_cross = top.copy()
 
 
 def process_cluster(label):
+    """ Processing of the blob corresponding to the input label
+
+    The function takes as input the id label of the current cluster and tries to remove the unnecessary 
+    pixels by selecting a square area around the centre of the blob. The resulting blob should have 
+    a shape that resembles the one of a cross. At this point the line fitting algorithms (hough transform, PCA)
+    can be applied
+    
+    The "check_single_cross" option allows to plot the result for each cluster separately
+
+    Input values:
+    - label: cluster id that corresponds to the current blob
+
+    Return values:
+    - centres of the cross: two lists with the [col, row] coordinates of the centre of the cross
+    of the current cluster. The first found with the custom method, the second with the centre of mass of the cluster
+    """
 
     nr_elements = sum(sum(labels == label))
 
     # Skipping too small and too large clusters
-    if nr_elements < 200 or nr_elements > 3500:
+    if nr_elements < 200 or nr_elements > 3500 or label == -1:
         # print("Skipped cluster with {}".format(nr_elements))
-        return
+        return None, None
 
     # New image to show the current cluster
     current_cluster = np.zeros(image_skeleton_dilated.shape)
@@ -168,10 +183,12 @@ def process_cluster(label):
     height_cross = min(top["row"] - centre_cross["row"], centre_cross["row"] - bottom["row"])
     width_cross = min(right["col"] - centre_cross["col"], centre_cross["col"] - left["col"])
 
-    limit_row_top = centre_cross["row"] + height_cross*0.8
-    limit_row_bottom = centre_cross["row"] - height_cross*0.8
-    limit_col_left = centre_cross["col"] - width_cross*0.8
-    limit_col_right = centre_cross["col"] + width_cross*0.8
+    cutoff_fraction = 0.7
+
+    limit_row_top = centre_cross["row"] + height_cross*cutoff_fraction
+    limit_row_bottom = centre_cross["row"] - height_cross*cutoff_fraction
+    limit_col_left = centre_cross["col"] - width_cross*cutoff_fraction
+    limit_col_right = centre_cross["col"] + width_cross*cutoff_fraction
 
 
     # Removing the edges of the cross to get a clearer shape
@@ -181,48 +198,74 @@ def process_cluster(label):
                 current_cluster[r,c] = 0
                 
 
-    # Centre of the blob as centre of mass
+    # Centre of the blob as its centre of mass
     centre_mass_row, centre_mass_col = center_of_mass(current_cluster)
 
 
-    # # Applying the hough transform to find the edges
-    origin = np.array((0, image_skeleton_dilated.shape[1]))
-    tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
-    h, theta, d = hough_line(current_cluster, theta=tested_angles)
+    # Fitting RANSAC on cross and finding main cross arm
+    X = pixel_cluster[:,2].reshape(-1, 1)
+    y = pixel_cluster[:,1].reshape(-1, 1)
+    ransac = RANSACRegressor()
+    ransac.fit(X,y)
+    inlier_mask = ransac.inlier_mask_
+    outlier_mask = np.logical_not(inlier_mask)
 
-    # for _, angle, dist in zip(*hough_line_peaks(h, theta, d, num_peaks=2)):
-    #     y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
-    #     plt.plot(origin, (y0, y1), '-r')
+    # Predict data of estimated models
+    line_X = np.arange(X.min(), X.max())[:, np.newaxis]
+    line_y_ransac = ransac.predict(line_X)
 
-    # Finding the crosses with PCA
-    # pixel_list_current_cluster = []
-    # for r in range(rows):
-    #     for c in range(cols):
-    #         if current_cluster[r,c] != 0:
-    #             pixel_list_current_cluster.append([r, c])
 
-    # pixel_list_current_cluster = np.array(pixel_list_current_cluster)
+    # Fitting RANSAC on the points that do not lie on the previously fitted line
+    # finds the second cross arm
+    X_perpendicular = []
+    y_perpendicular = []
 
-    # pca = PCA(n_components=2)
-    # pca.fit(pixel_list_current_cluster)
+    p1 = np.hstack([min(X).reshape(1,-1).ravel(), ransac.predict(min(X).reshape(1,-1)).ravel()])
+    p2 = np.hstack([max(X).reshape(1,-1).ravel(), ransac.predict(max(X).reshape(1,-1)).ravel()])
 
-    # m_1, m_2 = pca.components_[0]
+    for point in pixel_cluster:
+        p3 = point[3:0:-1]
+        dist_2_line = abs(np.cross(p2-p1, p3-p1)/np.linalg.norm(p2-p1))
 
-    # dx_1 = np.cos(np.arctan(m_1))
-    # dy_1 = np.sin(np.arctan(m_1))
+        # Only considering the points that are not close to the already fitted line
+        if dist_2_line > 10:
+            X_perpendicular.append(point[2])
+            y_perpendicular.append(point[1])
 
-    # dx_2 = np.cos(np.arctan(m_2))
-    # dy_2 = np.sin(np.arctan(m_2))
+    try:
+        X_perpendicular = np.array(X_perpendicular).reshape(-1,1)
+        y_perpendicular = np.array(y_perpendicular).reshape(-1,1)
+        line_X_perpendicular = np.arange(X_perpendicular.min(), X_perpendicular.max())[:, np.newaxis]
+        ransac.fit(X_perpendicular,y_perpendicular)
+        line_y_ransac_perpendicular = ransac.predict(line_X_perpendicular)
+
+    except:
+        X_perpendicular = np.empty([1,2])
+        y_perpendicular = np.empty([1,2])
+        line_X_perpendicular = np.empty([1,2])
+        line_y_ransac_perpendicular = np.empty([1,2])
 
 
     # Drawing a rectangle around the found blob
     rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
     current_cluster[rr_outer, cc_outer] = 255
 
-    rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*0.7, centre_cross["col"] + width_cross*0.7), (centre_cross["row"] - height_cross*0.7, centre_cross["col"] - width_cross*0.7), shape = current_cluster.shape)
+    # Drawing a rectangle around the centre of the blob
+    rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*cutoff_fraction, centre_cross["col"] + width_cross*cutoff_fraction), (centre_cross["row"] - height_cross*cutoff_fraction, centre_cross["col"] - width_cross*cutoff_fraction), shape = current_cluster.shape)
     current_cluster[rr_inner, cc_inner] = 255
 
+
     if check_single_cross:
+
+        plt.scatter(X,y)
+        plt.scatter(X_perpendicular, y_perpendicular)
+        plt.scatter(line_X, line_y_ransac)
+        plt.scatter(p1[0], p1[1])
+        plt.scatter(p2[0], p2[1])
+        plt.scatter(line_X_perpendicular, line_y_ransac_perpendicular)
+        plt.show()
+
+
         fig, ax = plt.subplots(1,2)
         ax[0].imshow(current_cluster, cmap="gray")
         ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
@@ -233,54 +276,49 @@ def process_cluster(label):
         ax[1].scatter(centre["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
         ax[1].scatter(centre_mass_col, centre_mass_row, color = 'tab:blue', label = "Centre of mass")
 
-        for _, angle, dist in zip(*hough_line_peaks(h, theta, d, num_peaks=2)):
-            y0, y1 = (dist - origin * np.cos(angle)) / np.sin(angle)
-            plt.plot(origin, (y0, y1), '-r')
+        plt.plot(line_X, line_y_ransac, label='RANSAC regressor')
+        plt.plot(line_X_perpendicular, line_y_ransac_perpendicular, label='RANSAC regressor perpendicular')
 
+        plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
         plt.legend()
         plt.show()
-    # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_1*10, centre["row"] + dy_1*10, width = 0.5)
-    # plt.arrow(centre["col"], centre["row"], centre["col"] + dx_2*10, centre["row"] + dy_2*10, width = 0.5)
 
-    # plt.scatter(centre_cross["col"], centre_cross["row"])
-
-    # plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
-    # plt.show()
-    return [centre_cross["col"], centre_cross["row"]], [centre_mass_col, centre_mass_row]
+    return [centre_cross["col"], centre_cross["row"]], np.hstack([line_X, line_y_ransac])
 
 
 
-# Parallelize cross finding operation over different cluster
-centres_custom = []
-centres_mass = []
 
-if check_single_cross == False:
-    with ProcessPoolExecutor() as executor:     
+cross_centres = []
+crosses = np.empty([0,2])
+
+if check_single_cross == False: # Parallelize cross finding operation over different cluster
+
+    with ProcessPoolExecutor() as executor:
         results = executor.map(process_cluster, np.unique(labels))
 
     # Store results
-    for centres in results:
-        if centres != None:
-            cross_centre_custom, cross_centre_mass = centres
-            centres_custom.append(cross_centre_custom)
-            centres_mass.append(cross_centre_mass)
+    for cross_centre, cross in results:
+        if cross_centre != None:
+            cross_centres.append(cross_centre)
+            crosses = np.vstack([crosses, cross])
 
-else:
+
+else: # Evaluate every cluster separetely and print the picture
 
     for label in np.unique(labels):
-        results = process_cluster(label)
-        if results != None:
-            cross_centre_custom, cross_centre_mass = results
-            centres_custom.append(cross_centre_custom)
-            centres_mass.append(cross_centre_mass)
+        cross_centre, cross = process_cluster(label)
+        
+        if cross_centre != None:
+            cross_centres.append(cross_centre)
+            crosses = np.vstack([crosses, cross])
 
 
+cross_centres = np.array(cross_centres)
+crosses = np.array(crosses)
 
-centres_custom = np.array(centres_custom)
-centres_mass = np.array(centres_mass)
 fig = plt.figure()
-plt.scatter(centres_custom[:,0], centres_custom[:,1], color = 'tab:orange', label ="Centre custom")
-plt.scatter(centres_mass[:,0], centres_mass[:,1], color = 'tab:blue', label = "Centre of mass")
+plt.scatter(crosses[:,0], crosses[:,1], color = 'tab:green', label = "Cross")
+plt.scatter(cross_centres[:,0], cross_centres[:,1], color = 'tab:blue', label = "Centres")
 plt.imshow(image_cropped, cmap = "gray")
 plt.legend()
 plt.show()
