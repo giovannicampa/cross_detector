@@ -21,6 +21,9 @@ check_pixel_shift = False
 check_preprocessing = True
 check_single_cross = True
 
+plt.rc('figure', titlesize=18)                  # fontsize of the figure title
+plt.rcParams.update({'axes.titlesize': 18})     # fontsize of the subplot title
+
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
 
@@ -62,21 +65,21 @@ image_skeleton_dilated = np.append(image_skeleton_dilated, np.zeros([shift_rows,
 # - Plots to check the preprocessing results
 if check_preprocessing:
 
-    fig, ax = plt.subplots(3,2)
+    fig, ax = plt.subplots(2,3)
     fig.suptitle('Preprocessing')
     
     ax[0,0].imshow(image_thresholded, cmap = "gray")
     ax[0,0].set_title("1. Thresholding")
-    ax[1,0].imshow(opening, cmap = "gray")
-    ax[1,0].set_title("2. Opening")
-    ax[2,0].imshow(closing, cmap = "gray")
-    ax[2,0].set_title("3. Closing")
-    ax[0,1].imshow(erode, cmap = "gray")
-    ax[0,1].set_title("4. Erosion")
+    ax[0,1].imshow(opening, cmap = "gray")
+    ax[0,1].set_title("2. Opening")
+    ax[0,2].imshow(closing, cmap = "gray")
+    ax[0,2].set_title("3. Closing")
+    ax[1,0].imshow(erode, cmap = "gray")
+    ax[1,0].set_title("4. Erosion")
     ax[1,1].imshow(image_skeleton, cmap = "gray")
     ax[1,1].set_title("5. Skeletonization")
-    ax[2,1].imshow(image_skeleton_dilated, cmap = "gray")
-    ax[2,1].set_title("6. Dilation")
+    ax[1,2].imshow(image_skeleton_dilated, cmap = "gray")
+    ax[1,2].set_title("6. Dilation")
 
     for i, a in enumerate(ax.ravel()):
         a.set_axis_off()
