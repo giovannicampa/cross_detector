@@ -110,7 +110,7 @@ left = top.copy()
 right = top.copy()
 centre = top.copy()
 centre_cross = top.copy()
-
+centre_intersection = top.copy()
 
 
 def process_cluster(label):
@@ -135,7 +135,7 @@ def process_cluster(label):
 
     # Skipping too small and too large clusters
     if nr_elements < 200 or nr_elements > 3500 or label == -1:
-        # print("Skipped cluster with {}".format(nr_elements))
+        print("Skipped cluster {} with {} pixels".format(label, nr_elements))
         return None, None, None
 
     # New image to show the current cluster
@@ -195,6 +195,7 @@ def process_cluster(label):
                 current_cluster[r,c] = 0
 
 
+    # Update the list of pixels with the cleaned cluster points
     pixel_cluster = []
     for r in range(rows):
         for c in range(cols):
@@ -233,11 +234,11 @@ def process_cluster(label):
     p2 = np.hstack([max(X).reshape(1,-1).ravel(), ransac.predict(max(X).reshape(1,-1)).ravel()])
 
     for point in pixel_cluster:
-        p3 = point[3:0:-1]
-        dist_2_line = abs(np.cross(p2-p1, p3-p1)/np.linalg.norm(p2-p1))
+        p_pixel = point[3:0:-1]
+        dist_2_line = abs(np.cross(p2-p1, p_pixel-p1)/np.linalg.norm(p2-p1))
 
         # Only considering the points that are not close to the already fitted line
-        if dist_2_line > 10:
+        if dist_2_line > 5:
             X_perpendicular.append(point[2])
             y_perpendicular.append(point[1])
 
@@ -245,13 +246,32 @@ def process_cluster(label):
     try:
         X_perpendicular = np.array(X_perpendicular).reshape(-1,1)
         y_perpendicular = np.array(y_perpendicular).reshape(-1,1)
-        line_X_perpendicular = np.arange(X_perpendicular.min(), X_perpendicular.max())[:, np.newaxis]
-        ransac.fit(X_perpendicular,y_perpendicular)
-        line_y_ransac_perpendicular = ransac.predict(line_X_perpendicular)
+
+        # line_X_perpendicular = np.arange(X_perpendicular.min(), X_perpendicular.max())[:, np.newaxis]
+        # ransac.fit(X_perpendicular,y_perpendicular)
+        # line_y_ransac_perpendicular = ransac.predict(line_X_perpendicular)
+        # p3 = np.hstack([min(X_perpendicular).reshape(1,-1).ravel(), ransac.predict(min(X_perpendicular).reshape(1,-1)).ravel()])
+        # p4 = np.hstack([max(X_perpendicular).reshape(1,-1).ravel(), ransac.predict(max(X_perpendicular).reshape(1,-1)).ravel()])
+
+        line_y_ransac_perpendicular = np.arange(y_perpendicular.min(), y_perpendicular.max())[:, np.newaxis]
+        ransac.fit(y_perpendicular, X_perpendicular)
+        line_X_perpendicular = ransac.predict(line_y_ransac_perpendicular)
+
+        p3 = np.hstack([ransac.predict(min(line_y_ransac_perpendicular).reshape(1,-1)).ravel(), min(line_y_ransac_perpendicular).reshape(1,-1).ravel()])
+        p4 = np.hstack([ransac.predict(max(line_y_ransac_perpendicular).reshape(1,-1)).ravel(), max(line_y_ransac_perpendicular).reshape(1,-1).ravel()])
 
     except:
         return None, None, None
 
+    # Intersection of two lines given by 4 points found at 
+    # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
+    centre_intersection["col"] = ((p1[0]*p2[1]-p1[1]*p2[0])*(p3[0]-p4[0])-(p1[0]-p2[0])*(p3[0]*p4[1]-p3[1]*p4[0]))/((p1[0]-p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]-p4[0])) 
+    centre_intersection["row"] = ((p1[0]*p2[1]-p1[1]*p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]*p4[1]-p3[1]*p4[0]))/((p1[0]-p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]-p4[0]))
+
+    alpha_1 = np.arctan((p1[1] - p2[1])/(p1[0] - p2[0]))*180/np.pi
+    alpha_2 = np.arctan((p3[1] - p4[1])/(p3[0] - p4[0]))*180/np.pi
+
+    print(f"Alpha 1: {alpha_1}°, alpha 2: {alpha_2}°, difference in deg: {alpha_2 - alpha_1}")
 
     if check_single_cross:
 
@@ -264,32 +284,44 @@ def process_cluster(label):
         current_cluster[rr_inner, cc_inner] = 255
 
 
-        plt.scatter(X,y, label="Cluster")
-        plt.scatter(X_perpendicular, y_perpendicular, label="Cluster secondary axis")
-        plt.scatter(line_X, line_y_ransac, label="Main axis")
-        plt.scatter(p1[0], p1[1], label="Point 1")
-        plt.scatter(p2[0], p2[1], label="Point 2")
-        plt.scatter(line_X_perpendicular, line_y_ransac_perpendicular, label="Secondary axis")
-        plt.legend()
-        plt.show()
 
+        fig, ax = plt.subplots(1,3)
+        fig.suptitle("Nr elements: {}, centre at row: {}, col: {}, delta anlges: {}".format(nr_elements, centre_intersection["row"], centre_intersection["col"], (alpha_2 - alpha_1)))
 
-        fig, ax = plt.subplots(1,2)
         ax[0].imshow(current_cluster, cmap="gray")
-        ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
+        ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Centre cross")
+        ax[0].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Centre cluster")
+        ax[0].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Centre intersection")
+        ax[0].scatter(p3[0],p3[1], label="p3")
+        ax[0].scatter(p4[0],p4[1], label="p4")
+        ax[0].set_title("Analysed cluster")
+        ax[0].legend()
 
         crop = image_cropped[int(bottom["row"]): int(top["row"]), int(left["col"]): int(right["col"])]
         ax[1].imshow(image_cropped, cmap = "gray")
-        ax[1].scatter(centre["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
+        ax[1].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Centre cross")
+        ax[1].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Centre cluster")
+        ax[1].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Centre intersection")
+        ax[1].plot(line_X, line_y_ransac, label='Axis main', color = "tab:green", linewidth = 4)
+        ax[1].plot(line_X_perpendicular, line_y_ransac_perpendicular, label='Axis secondary', color = "tab:red", linewidth = 4)
+        ax[1].set_ylim(current_cluster.shape[0],0)
+        ax[1].set_title("Result on original image")
+        ax[1].legend()
 
-        plt.plot(line_X, line_y_ransac, label='RANSAC regressor')
-        plt.plot(line_X_perpendicular, line_y_ransac_perpendicular, label='RANSAC regressor perpendicular')
-
-        plt.title("Nr elements: {}, centre at row: {}, col: {}, width: {}, height: {}".format(nr_elements, centre["row"], centre["col"], width, height))
-        plt.legend()
+        ax[2].scatter(X,y, label="Cluster", color = "tab:blue")
+        ax[2].scatter(X_perpendicular, y_perpendicular, label="Cluster secondary axis", color = "tab:orange")
+        ax[2].plot([p1[0],p2[0]],[p1[1],p2[1]], label = "Axis main", color = 'tab:green', linewidth = 4)
+        ax[2].plot([p3[0],p4[0]],[p3[1],p4[1]], label = "Axis secondary", color = 'tab:red', linewidth = 4)
+        ax[2].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Centre cross")
+        ax[2].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Centre cluster")
+        ax[2].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Centre intersection", s = 30)
+        ax[2].set_ylim(max(y)*1.1, min(y)*0.9)
+        ax[2].set_aspect('equal')
+        ax[2].set_title("Detection of cross arms and centre")
+        ax[2].legend()
         plt.show()
 
-    centre_of_cross = [centre_cross["col"], centre_cross["row"]]
+    centre_of_cross = [centre_intersection["col"], centre_intersection["row"]]
     arm_main = np.hstack([line_X, line_y_ransac])
     arm_secondary = np.hstack([line_X_perpendicular, line_y_ransac_perpendicular])
     
@@ -319,7 +351,7 @@ if check_single_cross == False: # Parallelize cross finding operation over diffe
 else: # Evaluate every cluster separetely and print the picture
 
     for label in np.unique(labels):
-        print("Processing: {}".format(label))
+        # print("Processing: {}".format(label))
         cross_centre, ax_main, ax_secondary = process_cluster(label)
         
         if cross_centre != None:
