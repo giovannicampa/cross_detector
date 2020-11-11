@@ -18,7 +18,7 @@ from sklearn.linear_model import RANSACRegressor
 import matplotlib.pyplot as plt
 
 check_pixel_shift = False
-check_preprocessing = True
+check_preprocessing = False
 check_single_cross = True
 
 plt.rc('figure', titlesize=18)                  # fontsize of the figure title
@@ -151,6 +151,7 @@ def process_cluster(label):
     # New image to show the current cluster
     current_cluster = np.zeros(image_skeleton_dilated.shape)
     current_cluster[labels == label] = 255
+    current_cluster_2_plot = current_cluster.copy()
 
     # Filtering out the pixels of the current cluster
     idx_cluster = (labels.ravel() == label).tolist()
@@ -282,47 +283,46 @@ def process_cluster(label):
 
         # Drawing a rectangle around the found blob
         rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
-        current_cluster[rr_outer, cc_outer] = 255
+        current_cluster_2_plot[rr_outer, cc_outer] = 255
 
         # Drawing a rectangle around the centre of the blob
         rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*cutoff_fraction, centre_cross["col"] + width_cross*cutoff_fraction), (centre_cross["row"] - height_cross*cutoff_fraction, centre_cross["col"] - width_cross*cutoff_fraction), shape = current_cluster.shape)
-        current_cluster[rr_inner, cc_inner] = 255
+        current_cluster_2_plot[rr_inner, cc_inner] = 255
 
 
 
         fig, ax = plt.subplots(1,3)
         fig.suptitle("Nr elements: {}, centre at row: {}, col: {}, delta anlges: {}".format(nr_elements, centre_intersection["row"], centre_intersection["col"], (alpha_2 - alpha_1)))
 
-        ax[0].imshow(current_cluster, cmap="gray")
-        ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Centre cross")
-        ax[0].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Centre cluster")
-        ax[0].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Centre intersection")
-        ax[0].scatter(p3[0],p3[1], label="p3")
-        ax[0].scatter(p4[0],p4[1], label="p4")
-        ax[0].set_title("Analysed cluster")
+
+        # crop = image_cropped[int(bottom["row"]): int(top["row"]), int(left["col"]): int(right["col"])]
+        ax[0].imshow(image_cropped, cmap = "gray")
+        ax[0].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Cluster centre")
+        ax[0].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Cross centre (intersection)", s = 100)
+        ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Reference for cropping")
+        ax[0].plot(line_X, line_y_ransac, label='Axis main', color = "tab:green", linewidth = 4)
+        ax[0].plot(line_X_perpendicular, line_y_ransac_perpendicular, label='Axis secondary', color = "tab:red", linewidth = 4)
+        ax[0].set_ylim(current_cluster.shape[0],0)
+        ax[0].set_title("Result on original image")
         ax[0].legend()
 
-        crop = image_cropped[int(bottom["row"]): int(top["row"]), int(left["col"]): int(right["col"])]
-        ax[1].imshow(image_cropped, cmap = "gray")
-        ax[1].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Centre cross")
-        ax[1].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Centre cluster")
-        ax[1].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Centre intersection")
-        ax[1].plot(line_X, line_y_ransac, label='Axis main', color = "tab:green", linewidth = 4)
-        ax[1].plot(line_X_perpendicular, line_y_ransac_perpendicular, label='Axis secondary', color = "tab:red", linewidth = 4)
-        ax[1].set_ylim(current_cluster.shape[0],0)
-        ax[1].set_title("Result on original image")
+        ax[1].imshow(current_cluster_2_plot, cmap="gray")
+        ax[1].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Cluster centre")
+        ax[1].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Cross centre (intersection)", s = 100)
+        ax[1].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Reference for cropping")
+        ax[1].set_title("Current cluster and cropping boundary")
         ax[1].legend()
 
-        ax[2].scatter(X,y, label="Cluster", color = "tab:blue")
+        ax[2].scatter(X,y, label="Cluster cropped", color = "tab:blue")
         ax[2].scatter(X_perpendicular, y_perpendicular, label="Cluster secondary axis", color = "tab:orange")
         ax[2].plot([p1[0],p2[0]],[p1[1],p2[1]], label = "Axis main", color = 'tab:green', linewidth = 4)
         ax[2].plot([p3[0],p4[0]],[p3[1],p4[1]], label = "Axis secondary", color = 'tab:red', linewidth = 4)
-        ax[2].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Centre cross")
-        ax[2].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Centre cluster")
-        ax[2].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Centre intersection", s = 30)
+        ax[2].scatter(centre["col"], centre["row"], color = 'tab:red', label ="Cluster centre")
+        ax[2].scatter(centre_intersection["col"], centre_intersection["row"], color = 'tab:purple', label ="Cross centre (intersection)", s = 200)
+        ax[2].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:cyan', label ="Reference for cropping")
         ax[2].set_ylim(max(y)*1.1, min(y)*0.9)
         ax[2].set_aspect('equal')
-        ax[2].set_title("Detection of cross arms and centre")
+        ax[2].set_title("Analysis of the cropped cluster")
         ax[2].legend()
         plt.show()
 
@@ -377,3 +377,4 @@ plt.imshow(image_cropped, cmap = "gray")
 plt.legend()
 plt.show()
 
+ 
