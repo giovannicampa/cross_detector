@@ -16,9 +16,6 @@ from sklearn.cluster import DBSCAN
 from sklearn.linear_model import RANSACRegressor
 
 import matplotlib.pyplot as plt
-from matplotlib import cm
-
-from scipy.ndimage.measurements import center_of_mass
 
 check_pixel_shift = False
 check_preprocessing = False
@@ -97,7 +94,7 @@ pixel_list = []
 rows, cols = image_skeleton_dilated.shape
 for r in range(rows):
     for c in range(cols):
-        pixel_list.append([image_skeleton_dilated[r, c], r, c])
+        pixel_list.append([image_skeleton_dilated[r, c], r, c])     # [Pixel value, row, col]
 
 pixel_list = np.array(pixel_list)
 
@@ -139,7 +136,7 @@ def process_cluster(label):
     # Skipping too small and too large clusters
     if nr_elements < 200 or nr_elements > 3500 or label == -1:
         # print("Skipped cluster with {}".format(nr_elements))
-        return None, None
+        return None, None, None
 
     # New image to show the current cluster
     current_cluster = np.zeros(image_skeleton_dilated.shape)
@@ -196,17 +193,29 @@ def process_cluster(label):
         for c in range(cols):
             if r > limit_row_top or r < limit_row_bottom or c > limit_col_right or c < limit_col_left:
                 current_cluster[r,c] = 0
-                
 
-    # Centre of the blob as its centre of mass
-    centre_mass_row, centre_mass_col = center_of_mass(current_cluster)
 
+    pixel_cluster = []
+    for r in range(rows):
+        for c in range(cols):
+            if current_cluster[r, c] != 0:
+                pixel_cluster.append([current_cluster[r, c], r, c])     # [Pixel value, row, col]
+
+    pixel_cluster = np.array(pixel_cluster)
+
+
+    if pixel_cluster.size == 0:
+        return None, None, None
 
     # Fitting RANSAC on cross and finding main cross arm
     X = pixel_cluster[:,2].reshape(-1, 1)
     y = pixel_cluster[:,1].reshape(-1, 1)
     ransac = RANSACRegressor()
-    ransac.fit(X,y)
+
+    try:
+        ransac.fit(X,y)
+    except:
+        return None, None, None
     inlier_mask = ransac.inlier_mask_
     outlier_mask = np.logical_not(inlier_mask)
 
@@ -232,6 +241,7 @@ def process_cluster(label):
             X_perpendicular.append(point[2])
             y_perpendicular.append(point[1])
 
+
     try:
         X_perpendicular = np.array(X_perpendicular).reshape(-1,1)
         y_perpendicular = np.array(y_perpendicular).reshape(-1,1)
@@ -240,41 +250,37 @@ def process_cluster(label):
         line_y_ransac_perpendicular = ransac.predict(line_X_perpendicular)
 
     except:
-        X_perpendicular = np.empty([1,2])
-        y_perpendicular = np.empty([1,2])
-        line_X_perpendicular = np.empty([1,2])
-        line_y_ransac_perpendicular = np.empty([1,2])
-
-
-    # Drawing a rectangle around the found blob
-    rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
-    current_cluster[rr_outer, cc_outer] = 255
-
-    # Drawing a rectangle around the centre of the blob
-    rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*cutoff_fraction, centre_cross["col"] + width_cross*cutoff_fraction), (centre_cross["row"] - height_cross*cutoff_fraction, centre_cross["col"] - width_cross*cutoff_fraction), shape = current_cluster.shape)
-    current_cluster[rr_inner, cc_inner] = 255
+        return None, None, None
 
 
     if check_single_cross:
 
-        plt.scatter(X,y)
-        plt.scatter(X_perpendicular, y_perpendicular)
-        plt.scatter(line_X, line_y_ransac)
-        plt.scatter(p1[0], p1[1])
-        plt.scatter(p2[0], p2[1])
-        plt.scatter(line_X_perpendicular, line_y_ransac_perpendicular)
+        # Drawing a rectangle around the found blob
+        rr_outer, cc_outer = rectangle_perimeter((top["row"], left["col"]), (bottom["row"], right["col"]), shape = current_cluster.shape)
+        current_cluster[rr_outer, cc_outer] = 255
+
+        # Drawing a rectangle around the centre of the blob
+        rr_inner, cc_inner = rectangle_perimeter((centre_cross["row"] + height_cross*cutoff_fraction, centre_cross["col"] + width_cross*cutoff_fraction), (centre_cross["row"] - height_cross*cutoff_fraction, centre_cross["col"] - width_cross*cutoff_fraction), shape = current_cluster.shape)
+        current_cluster[rr_inner, cc_inner] = 255
+
+
+        plt.scatter(X,y, label="Cluster")
+        plt.scatter(X_perpendicular, y_perpendicular, label="Cluster secondary axis")
+        plt.scatter(line_X, line_y_ransac, label="Main axis")
+        plt.scatter(p1[0], p1[1], label="Point 1")
+        plt.scatter(p2[0], p2[1], label="Point 2")
+        plt.scatter(line_X_perpendicular, line_y_ransac_perpendicular, label="Secondary axis")
+        plt.legend()
         plt.show()
 
 
         fig, ax = plt.subplots(1,2)
         ax[0].imshow(current_cluster, cmap="gray")
         ax[0].scatter(centre_cross["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
-        ax[0].scatter(centre_mass_col, centre_mass_row, color = 'tab:blue', label = "Centre of mass")
 
         crop = image_cropped[int(bottom["row"]): int(top["row"]), int(left["col"]): int(right["col"])]
         ax[1].imshow(image_cropped, cmap = "gray")
         ax[1].scatter(centre["col"], centre_cross["row"], color = 'tab:orange', label ="Centre custom")
-        ax[1].scatter(centre_mass_col, centre_mass_row, color = 'tab:blue', label = "Centre of mass")
 
         plt.plot(line_X, line_y_ransac, label='RANSAC regressor')
         plt.plot(line_X_perpendicular, line_y_ransac_perpendicular, label='RANSAC regressor perpendicular')
@@ -283,13 +289,19 @@ def process_cluster(label):
         plt.legend()
         plt.show()
 
-    return [centre_cross["col"], centre_cross["row"]], np.hstack([line_X, line_y_ransac])
+    centre_of_cross = [centre_cross["col"], centre_cross["row"]]
+    arm_main = np.hstack([line_X, line_y_ransac])
+    arm_secondary = np.hstack([line_X_perpendicular, line_y_ransac_perpendicular])
+    
+    return centre_of_cross,arm_main, arm_secondary
+
 
 
 
 
 cross_centres = []
-crosses = np.empty([0,2])
+axes_main = np.empty([0,2])
+axes_secondary = np.empty([0,2])
 
 if check_single_cross == False: # Parallelize cross finding operation over different cluster
 
@@ -297,27 +309,32 @@ if check_single_cross == False: # Parallelize cross finding operation over diffe
         results = executor.map(process_cluster, np.unique(labels))
 
     # Store results
-    for cross_centre, cross in results:
+    for cross_centre, ax_main, ax_secondary in results:
         if cross_centre != None:
             cross_centres.append(cross_centre)
-            crosses = np.vstack([crosses, cross])
+            axes_main = np.vstack([axes_main, ax_main])
+            axes_secondary = np.vstack([axes_secondary, ax_secondary])
 
 
 else: # Evaluate every cluster separetely and print the picture
 
     for label in np.unique(labels):
-        cross_centre, cross = process_cluster(label)
+        print("Processing: {}".format(label))
+        cross_centre, ax_main, ax_secondary = process_cluster(label)
         
         if cross_centre != None:
             cross_centres.append(cross_centre)
-            crosses = np.vstack([crosses, cross])
+            axes_main = np.vstack([axes_main, ax_main])
+            axes_secondary = np.vstack([axes_secondary, ax_secondary])
 
 
 cross_centres = np.array(cross_centres)
-crosses = np.array(crosses)
+axes_main = np.array(axes_main)
+axes_secondary = np.array(axes_secondary)
 
 fig = plt.figure()
-plt.scatter(crosses[:,0], crosses[:,1], color = 'tab:green', label = "Cross")
+plt.scatter(axes_main[:,0], axes_main[:,1], color = 'tab:green', label = "Axes main")
+plt.scatter(axes_secondary[:,0], axes_secondary[:,1], color = 'tab:green', label = "Axes secondary")
 plt.scatter(cross_centres[:,0], cross_centres[:,1], color = 'tab:blue', label = "Centres")
 plt.imshow(image_cropped, cmap = "gray")
 plt.legend()
