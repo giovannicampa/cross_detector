@@ -18,8 +18,8 @@ from sklearn.linear_model import RANSACRegressor
 import matplotlib.pyplot as plt
 
 check_pixel_shift = False
-check_preprocessing = False
-check_single_cross = False
+check_preprocessing = True
+check_single_cross = True
 
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
@@ -64,19 +64,26 @@ if check_preprocessing:
 
     fig, ax = plt.subplots(3,2)
     fig.suptitle('Preprocessing')
+    
     ax[0,0].imshow(image_thresholded, cmap = "gray")
-    ax[0,1].imshow(opening, cmap = "gray")
-    ax[1,0].imshow(closing, cmap = "gray")
-    ax[1,1].imshow(erode, cmap = "gray")
-    ax[2,0].imshow(image_skeleton, cmap = "gray")
+    ax[0,0].set_title("1. Thresholding")
+    ax[1,0].imshow(opening, cmap = "gray")
+    ax[1,0].set_title("2. Opening")
+    ax[2,0].imshow(closing, cmap = "gray")
+    ax[2,0].set_title("3. Closing")
+    ax[0,1].imshow(erode, cmap = "gray")
+    ax[0,1].set_title("4. Erosion")
+    ax[1,1].imshow(image_skeleton, cmap = "gray")
+    ax[1,1].set_title("5. Skeletonization")
     ax[2,1].imshow(image_skeleton_dilated, cmap = "gray")
-
-    titles = ["image_thresholded","opening","closing","erode", "skeleton", "skeleton dilated"]
+    ax[2,1].set_title("6. Dilation")
 
     for i, a in enumerate(ax.ravel()):
-        a.set_title(titles[i])
         a.set_axis_off()
+    plt.show()
 
+# Since the preprocessing operations affect the resulting location of the processed image,
+# this needs to be shifted to match the location of the original picture
 if check_pixel_shift:
 
     f = plt.figure()
@@ -247,11 +254,6 @@ def process_cluster(label):
         X_perpendicular = np.array(X_perpendicular).reshape(-1,1)
         y_perpendicular = np.array(y_perpendicular).reshape(-1,1)
 
-        # line_X_perpendicular = np.arange(X_perpendicular.min(), X_perpendicular.max())[:, np.newaxis]
-        # ransac.fit(X_perpendicular,y_perpendicular)
-        # line_y_ransac_perpendicular = ransac.predict(line_X_perpendicular)
-        # p3 = np.hstack([min(X_perpendicular).reshape(1,-1).ravel(), ransac.predict(min(X_perpendicular).reshape(1,-1)).ravel()])
-        # p4 = np.hstack([max(X_perpendicular).reshape(1,-1).ravel(), ransac.predict(max(X_perpendicular).reshape(1,-1)).ravel()])
 
         line_y_ransac_perpendicular = np.arange(y_perpendicular.min(), y_perpendicular.max())[:, np.newaxis]
         ransac.fit(y_perpendicular, X_perpendicular)
@@ -351,7 +353,7 @@ if check_single_cross == False: # Parallelize cross finding operation over diffe
 else: # Evaluate every cluster separetely and print the picture
 
     for label in np.unique(labels):
-        # print("Processing: {}".format(label))
+        print("Processing: {}".format(label))
         cross_centre, ax_main, ax_secondary = process_cluster(label)
         
         if cross_centre != None:
