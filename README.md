@@ -39,5 +39,5 @@ The centre of the cross is considered to be at the intersection of the two found
 
 The resulting plot shows the detected crosses and tells the mean, max and minimum distance between neighbouring crosses.
 <p align="center">
-  <img align="center" src="https://github.com/giovannicampa/cross_detector/blob/master/src/result.png" width="1000">
+  <img align="center" src="https://github.com/giovannicampa/cross_detector/blob/master/src/result.png" width="800">
 </p>
