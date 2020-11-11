@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 check_pixel_shift = False
 check_preprocessing = False
-check_single_cross = True
+check_single_cross = False
 
 plt.rc('figure', titlesize=18)                  # fontsize of the figure title
 plt.rcParams.update({'axes.titlesize': 18})     # fontsize of the subplot title
@@ -191,7 +191,7 @@ def process_cluster(label):
     height_cross = min(top["row"] - centre_cross["row"], centre_cross["row"] - bottom["row"])
     width_cross = min(right["col"] - centre_cross["col"], centre_cross["col"] - left["col"])
 
-    cutoff_fraction = 0.7
+    cutoff_fraction = 0.8
 
     limit_row_top = centre_cross["row"] + height_cross*cutoff_fraction
     limit_row_bottom = centre_cross["row"] - height_cross*cutoff_fraction
@@ -278,6 +278,10 @@ def process_cluster(label):
     alpha_2 = np.arctan((p3[1] - p4[1])/(p3[0] - p4[0]))*180/np.pi
 
     print(f"Alpha 1: {alpha_1}°, alpha 2: {alpha_2}°, difference in deg: {alpha_2 - alpha_1}")
+
+    # If the two axes are not perpendicular, then the analysed cluster is not a cross
+    if abs(alpha_2 - alpha_1) < 75 or abs(alpha_2 - alpha_1) > 105:
+        return None, None, None
 
     if check_single_cross:
 
@@ -369,11 +373,47 @@ cross_centres = np.array(cross_centres)
 axes_main = np.array(axes_main)
 axes_secondary = np.array(axes_secondary)
 
+
+# Finding the minimum distance between point pairs
+min_dist_centre_2_centre = []
+for centre_1 in cross_centres:
+
+    min_dist_to_centre_1 = np.inf
+    
+    for centre_2 in cross_centres:
+        if (np.equal(centre_1, centre_2)).all() == False:
+            distance_current_pair = np.linalg.norm(centre_1 - centre_2)
+
+            if distance_current_pair < min_dist_to_centre_1:
+
+                min_centre_2 = centre_2
+                min_dist_to_centre_1 = distance_current_pair
+
+    min_dist_centre_2_centre.append([min_dist_to_centre_1, centre_1, min_centre_2])
+
+min_dist_centre_2_centre = np.array(min_dist_centre_2_centre)
+
+id_max_distance = np.argmax(min_dist_centre_2_centre[:,0])
+id_min_distance = np.argmin(min_dist_centre_2_centre[:,0])
+
+centre_1_max = min_dist_centre_2_centre[id_max_distance,1]
+centre_2_max = min_dist_centre_2_centre[id_max_distance,2]
+centre_1_min = min_dist_centre_2_centre[id_min_distance,1]
+centre_2_min = min_dist_centre_2_centre[id_min_distance,2]
+
+pixels_2_500microm = 343
+median_distance = np.median(min_dist_centre_2_centre[:,0])
+max_distance = np.max(min_dist_centre_2_centre[:,0])
+min_distance = np.min(min_dist_centre_2_centre[:,0])
+
 fig = plt.figure()
 plt.scatter(axes_main[:,0], axes_main[:,1], color = 'tab:green', label = "Axes main")
-plt.scatter(axes_secondary[:,0], axes_secondary[:,1], color = 'tab:green', label = "Axes secondary")
-plt.scatter(cross_centres[:,0], cross_centres[:,1], color = 'tab:blue', label = "Centres")
+plt.scatter(axes_secondary[:,0], axes_secondary[:,1], color = 'tab:red', label = "Axes secondary")
+plt.scatter(cross_centres[:,0], cross_centres[:,1], color = 'tab:purple', label = "Centres")
+plt.plot([centre_1_max[0], centre_2_max[0]], [centre_1_max[1], centre_2_max[1]], label = "Max distance to closest", linewidth = 4)
+plt.plot([centre_1_min[0], centre_2_min[0]], [centre_1_min[1], centre_2_min[1]], label = "Min distance to closest", linewidth = 4)
 plt.imshow(image_cropped, cmap = "gray")
+plt.title(f"Distance between closest crosses - median: {median_distance*500/pixels_2_500microm:.1f} μm, min: {min_distance*500/pixels_2_500microm:.1f} μm, max: {max_distance*500/pixels_2_500microm:.1f} μm")
 plt.legend()
 plt.show()
 
