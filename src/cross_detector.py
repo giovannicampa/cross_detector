@@ -16,6 +16,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.linear_model import RANSACRegressor
 
 import matplotlib.pyplot as plt
+from scipy.ndimage.measurements import center_of_mass
 
 check_pixel_shift = False
 check_preprocessing = False
@@ -27,7 +28,7 @@ plt.rcParams.update({'axes.titlesize': 18})     # fontsize of the subplot title
 # ---------------------------------------------------------------------------------------------------------
 # - Reading image
 
-image_original = io.imread("./src/dendrite_crosses.jpg")
+image_original = io.imread("./src/dendrites_ema.jpg")
 image_cropped = image_original[20:-20, 20:-20]              # Cropping the border
 image= rgb2gray(image_cropped)                              # Converting to gray
 image[800:-1, 860:-1] = 0                                   # Removing the measure reference at the bottom right
@@ -274,6 +275,9 @@ def process_cluster(label):
     centre_intersection["col"] = ((p1[0]*p2[1]-p1[1]*p2[0])*(p3[0]-p4[0])-(p1[0]-p2[0])*(p3[0]*p4[1]-p3[1]*p4[0]))/((p1[0]-p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]-p4[0])) 
     centre_intersection["row"] = ((p1[0]*p2[1]-p1[1]*p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]*p4[1]-p3[1]*p4[0]))/((p1[0]-p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]-p4[0]))
 
+    if np.isnan(centre_intersection["col"]) or np.isnan(centre_intersection["row"]):
+        return None, None, None
+
     alpha_1 = np.arctan((p1[1] - p2[1])/(p1[0] - p2[0]))*180/np.pi
     alpha_2 = np.arctan((p3[1] - p4[1])/(p3[0] - p4[0]))*180/np.pi
 
@@ -379,12 +383,17 @@ min_dist_centre_2_centre = []
 for centre_1 in cross_centres:
 
     min_dist_to_centre_1 = np.inf
-    
+    min_centre_2 = np.inf
     for centre_2 in cross_centres:
         if (np.equal(centre_1, centre_2)).all() == False:
             distance_current_pair = np.linalg.norm(centre_1 - centre_2)
 
-            if distance_current_pair < min_dist_to_centre_1:
+            if np.isinf(distance_current_pair) or np.isnan(distance_current_pair):
+                distance_current_pair = 10000
+                min_dist_to_centre_1 = 10000
+                continue
+
+            elif distance_current_pair < min_dist_to_centre_1:
 
                 min_centre_2 = centre_2
                 min_dist_to_centre_1 = distance_current_pair
