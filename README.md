@@ -41,3 +41,6 @@ The resulting plot shows the detected crosses and tells the mean, max and minimu
 <p align="center">
   <img align="center" src="https://github.com/giovannicampa/cross_detector/blob/master/src/result.png" width="800">
 </p>
+
+## Thanks
+Special thanks to Joana and Syrine for keeping me from overworking on "lockdown projects".
